@@ -1,0 +1,108 @@
+name: Deploy Bloglist
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize]
+
+jobs:
+  deploy_bloglist:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Install dependencies backend
+        run: npm install
+
+      - name: Install dependencies frontend
+        working-directory: client
+        run: npm install
+
+      - name: Check Lint
+        working-directory: client
+        run: npm run lint
+
+      - name: Build
+        working-directory: client
+        run: npm run build
+
+      - name: Test backend
+        env:
+          TEST_MONGODB_URI: ${{ secrets.TEST_MONGODB_URI }}
+          SECRET: ${{ secrets.SECRET }}
+        run: |
+          echo "$TEST_MONGODB_URI"
+          echo "$SECRET"
+          npm run test
+
+      - name: Test frontend
+        working-directory: client
+        run: npm run test
+
+      - name: Test e2e
+        uses: cypress-io/github-action@v5
+        env:
+          PORT: ${{ secrets.PORT }}
+          TEST_MONGODB_URI: ${{ secrets.TEST_MONGODB_URI }}
+          SECRET: ${{ secrets.SECRET }}
+          run: |
+            echo "$PORT"
+            echo "$TEST_MONGODB_URI"
+            echo "$SECRET"
+        with:
+          command: npm run cypress:run
+          start: npm run start:test
+          wait-on: http://localhost:3003
+
+      - name: Deploy Bloglit in Render
+        env:
+          SKIP: ${{ contains(toJson(github.event.head_commit.message), '#skip') }}
+        if: ${{ github.event_name == 'push' && env.SKIP == 'false' }}
+        run: |
+          echo "$SKIP"
+          curl ${{ secrets.RENDER_DEPLOY_HOOK }}
+
+      - name: Notify Discord Success
+        if: ${{ success() }}
+        uses: rjstone/discord-webhook-notify@v1
+        with:
+          severity: info
+          username: GitHub
+          text: Bloglist deployed Success
+          description: To ${{ secrets.RENDER_DEPLOY_URL }} By ${{ github.actor }}
+          footer: "Severity: Informational"
+          webhookUrl: ${{ secrets.DISCORD_WEBHOOK }}
+
+      - name: Notify Discord Failure
+        if: ${{ failure() }}
+        uses: rjstone/discord-webhook-notify@v1
+        with:
+          severity: error
+          username: GitHub
+          text: Deploy Failed
+          description: Commit ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }} By ${{ github.actor }} :(
+          footer: "Severity: Error"
+          webhookUrl: ${{ secrets.DISCORD_WEBHOOK }}
+
+  tag_release:
+    needs: [deploy_bloglist]
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump version and Push
+        if: ${{ github.event_name == 'push' && env.SKIP == 'false' }}
+        uses: anothrNick/github-tag-action@1.67.0
+        env:
+          SKIP: ${{ contains(toJson(github.event.head_commit.message), '#skip') }}
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          DEFAULT_BUMP: patch

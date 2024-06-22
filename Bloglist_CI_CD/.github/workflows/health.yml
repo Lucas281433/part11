@@ -1,0 +1,16 @@
+name: Health Check
+
+on:
+  workflow_dispatch: 
+
+jobs:
+  health_check:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Check Deploy url service
+        uses: jtalk/url-health-check-action@v4
+        with:
+          url: https://bloglist-ci-cd-puut.onrender.com/health
+          follow-redirect: true
+          max-attempts: 3
+          retry-delay: 5s
